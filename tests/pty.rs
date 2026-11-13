@@ -318,11 +318,11 @@ fn a_config_file_that_is_not_there_is_an_error() {
 
 #[test]
 fn a_string_of_commands_is_run_by_tmux() {
-    // The string of the user, a `;` inside quotes, and a file before it: they run in
-    // the order of the command line, and allow-passthrough "all" is kept.
+    // The string of the user, and a file before it: they run in the order of the
+    // command line, and allow-passthrough "all" is kept.
     let conf = config_file("string", "set -g mouse off\nset -g mode-keys emacs\n");
     let commands = "set -g mouse on; setw -g mode-keys vi;set -g set-clipboard on ; \
-                    set -g allow-passthrough all; set -g status-left 'a; b'";
+                    set -g allow-passthrough all; set -g status-left 'a b'";
     let option = format!("--config-string={commands}");
     let queries: &[&[&str]] = &[
         &["show-options", "-gv", "mouse"],
@@ -334,7 +334,7 @@ fn a_string_of_commands_is_run_by_tmux() {
     // The shell of tmux takes the string, so it is quoted for it.
     let quoted = format!("'{}'", option.replace('\'', "'\\''"));
     if let Some(answers) = in_tmux(&["-c", &conf, &quoted], queries) {
-        assert_eq!(answers, ["on", "vi", "on", "a; b", "all"]);
+        assert_eq!(answers, ["on", "vi", "on", "a b", "all"]);
     }
 }
 
@@ -351,4 +351,38 @@ fn an_empty_string_of_commands_is_an_error() {
     let r = run(&["--config-string", "  ", "true"], Some("/tmp/x,1,0"));
     assert_eq!(r.code, 2);
     assert!(contains(&r.output, b"--config-string"));
+}
+
+#[test]
+fn a_command_that_tmux_refuses_does_not_stop_the_others() {
+    // In the file, and in the string, the bad one is in the middle.
+    let conf = config_file(
+        "bad",
+        "set -g mouse on\nbogus-command here\nsetw -g mode-keys vi\n",
+    );
+    let queries: &[&[&str]] = &[
+        &["show-options", "-gv", "mouse"],
+        &["show-window-options", "-gv", "mode-keys"],
+        &["show-options", "-gv", "set-clipboard"],
+        &["show-options", "-gv", "status-left"],
+    ];
+    let string = "'set -g set-clipboard on; bogus-command; set -g status-left x'";
+    if let Some(answers) = in_tmux(&["-c", &conf, "--config-string", string], queries) {
+        assert_eq!(answers, ["on", "vi", "on", "x"]);
+    }
+}
+
+#[test]
+fn a_config_file_with_comments_and_blank_lines() {
+    let conf = config_file(
+        "comments",
+        "# the mouse\nset -g mouse on   \n\n  # more\n  set -g status-left 'a b'\n",
+    );
+    let queries: &[&[&str]] = &[
+        &["show-options", "-gv", "mouse"],
+        &["show-options", "-gv", "status-left"],
+    ];
+    if let Some(answers) = in_tmux(&["-c", &conf], queries) {
+        assert_eq!(answers, ["on", "a b"]);
+    }
 }

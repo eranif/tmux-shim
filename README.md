@@ -46,9 +46,15 @@ tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [-c FILE] [--config-string
 |---|---|
 | `--wrap MODE` | `auto` (default): tmux if `$TMUX` is set, screen if `$STY` is set, otherwise the program is started directly. `none` still runs the shim, without wrapping. |
 | `--no-reply` | Pass `OSC 7501 ; ?` on instead of answering it. |
-| `-c`, `--config FILE` | Inside tmux, run `tmux source-file FILE` before the program starts, for the settings of tmux that the program needs (mouse, vi keys, clipboard, ...). The file must exist; errors in it are printed and the program starts anyway. It changes the whole tmux server, not just the pane, and runs at every start of the shim. |
-| `--config-string COMMANDS` | The same, for tmux commands in a string, written like the lines of a config file: `--config-string 'set -g mouse on; setw -g mode-keys vi; set -g set-clipboard on; set -g allow-passthrough all'`. It is run with `tmux source-file -`, so quotes and `;` work as in a config file, and a line with a command that tmux does not know is skipped whole. `-c` and `--config-string` can be repeated; they run in the order of the command line. |
+| `-c`, `--config FILE` | Inside tmux, apply the tmux commands of the file before the program starts: the settings of tmux that the program needs (mouse, vi keys, clipboard, ...). One command per line; blank lines and lines that start with `#` are skipped. The file must exist. |
+| `--config-string COMMANDS` | The same, for the commands in the argument, separated by `;`: `--config-string 'set -g mouse on; setw -g mode-keys vi; set -g set-clipboard on; set -g allow-passthrough all'`. |
 | `--no-tmux-setup` | Do not run `tmux set-option -p allow-passthrough on` (see below). |
+
+Each command is given to tmux on its own, in the order of the command line (`-c` and
+`--config-string` can be repeated). A command that tmux does not accept does not stop the
+others: the shim prints `tmux-shim: FILE:LINE: what tmux said` to stderr and starts the
+program anyway. The commands change the whole tmux server, not just the pane, and run at
+every start of the shim.
 
 tmux forwards the wrapped sequences only when `allow-passthrough` is on. In tmux 3.3 or
 later the shim turns it on for its own pane when it is `off`, before it starts the program.

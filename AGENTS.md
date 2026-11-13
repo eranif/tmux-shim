@@ -53,6 +53,7 @@ is built (aarch64 was dropped). Do not rename it: Kennel depends on the name.
 | File | What |
 |---|---|
 | `src/filter.rs` | The filter: a state machine over the output bytes. Pure, portable, no I/O. |
+| `src/config.rs` | The text of `--config` / `--config-string` cut into tmux commands (a line, or a `;`). Pure, no I/O. |
 | `src/proxy.rs` | The pty, the `poll()` loop, signals, the terminal mode. Unix only, uses `libc`. |
 | `src/main.rs` | The command line, and the choice of the wrap mode. |
 | `tests/pty.rs` | Integration tests: the real binary on a pty, with `sh` as the program. |
@@ -134,9 +135,14 @@ Tests:
 * `allow-passthrough` is a pane option (3.3+), so the shim turns it on for its own pane at
   startup when it is `off` (`tmux set-option -p allow-passthrough on`, errors ignored,
   `--no-tmux-setup` skips it). A pane value overrides the server's, so an `all` is never
-  replaced by `on`. `-c FILE` runs `tmux source-file FILE` first (absolute path: the server has
-  its own cwd). `--config-string` pipes the commands to `tmux source-file -` (tmux 3.4 does not parse
-  a string of commands given as one argument). It cannot do it for other panes or set `all`: whoever starts tmux does that.
+  replaced by `on`. `-c FILE` (one command per line, `#` comments) and
+  `--config-string` (commands between `;`) are read by the shim (`src/config.rs`), and each
+  command goes to its own `tmux source-file -` on stdin (tmux 3.4 does not parse a string of
+  commands given as one argument), so one that tmux refuses does not stop the others and the
+  error says `FILE:LINE`. Keep it that simple: no quotes, continuation or blocks of its own.
+  They run before the allow-passthrough check, which they may satisfy themselves.
+  The shim cannot do it for other panes: setting `allow-passthrough all` for the whole server is
+  what `-c` / `--config-string` are for, or whoever starts tmux.
 
 ## Commits
 

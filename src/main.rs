@@ -7,6 +7,8 @@
 //!
 //! See the README.
 
+#[cfg(unix)]
+mod config;
 mod filter;
 #[cfg(unix)]
 mod proxy;
@@ -38,11 +40,11 @@ Options:
                 otherwise none), tmux, screen, or none
   --no-reply    do not answer OSC 7501;? (pass it on instead)
   -c, --config FILE
-                inside tmux, run `tmux source-file FILE` before the program
-                starts (the settings of tmux that the program needs)
+                inside tmux, apply the tmux commands of FILE (one per line,
+                `#` for comments) before the program starts
   --config-string COMMANDS
-                the same for tmux commands in a string, like the lines of a
-                config file: 'set -g mouse on; setw -g mode-keys vi'
+                the same, for commands in the argument, separated by `;`:
+                'set -g mouse on; setw -g mode-keys vi'
   --no-tmux-setup
                 do not turn on allow-passthrough for the pane (see below)
   -h, --help    show this text
@@ -91,20 +93,20 @@ Options:
             "--no-reply" => answer_query = false,
             "--no-tmux-setup" => tmux_setup = false,
             "-c" | "--config" => match args.next() {
-                Some(file) => setup.push(Setup::File(config_path(&file))),
+                Some(file) => setup.push(Setup::from_file(&file)),
                 None => usage_error("--config needs a file"),
             },
             _ if text.starts_with("--config=") => {
                 let file = OsString::from(&text["--config=".len()..]);
-                setup.push(Setup::File(config_path(&file)));
+                setup.push(Setup::from_file(&file));
             }
             "--config-string" => match args.next() {
-                Some(commands) => setup.push(Setup::commands(&commands)),
+                Some(commands) => setup.push(Setup::from_string(&commands)),
                 None => usage_error("--config-string needs tmux commands"),
             },
             _ if text.starts_with("--config-string=") => {
                 let commands = OsString::from(&text["--config-string=".len()..]);
-                setup.push(Setup::commands(&commands));
+                setup.push(Setup::from_string(&commands));
             }
             "--wrap" => {
                 let value = args.next().map(|v| v.to_string_lossy().into_owned());
@@ -162,41 +164,43 @@ Options:
         Err(err) => fail_to_start(&command[0], &err),
     }
 
-    /// The absolute path of the file for `--config`. tmux reads the file in the
-    /// server, which has its own current directory, so a relative path would be
-    /// looked for in the wrong place. A file that is not there is a mistake in
-    /// the command line, better told now than ignored.
-    fn config_path(file: &std::ffi::OsStr) -> std::path::PathBuf {
-        match std::fs::canonicalize(file) {
-            Ok(path) => path,
-            Err(err) => usage_error(&format!("--config {}: {err}", file.to_string_lossy())),
-        }
-    }
-
-    /// Runs a file or a string of commands in tmux (`source-file`; a string goes
-    /// in through stdin, `source-file -`, because tmux does not take a string of
-    /// commands as one argument, and `source-file` knows the quotes and the `;`
-    /// of its own syntax). The errors (a line that tmux does not know, for
-    /// instance) go to stderr, and the program is started anyway.
+    /// Gives every command of `--config` and `--config-string` to tmux, one by
+    /// one, in the order of the command line. A command is a `source-file -`
+    /// that gets it on stdin: tmux does not take a string of commands as one
+    /// argument, and `source-file` knows the quotes of its own syntax. One by
+    /// one, so that a command that tmux does not accept does not take the others
+    /// with it. What tmux says about it goes to stderr with the file and the
+    /// line, and the program is started anyway.
     fn run_setup(item: &Setup) {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        let mut cmd = Command::new("tmux");
-        cmd.arg("source-file").stdout(Stdio::null());
-        match item {
-            Setup::File(file) => {
-                let _ = cmd.arg(file).stdin(Stdio::null()).status();
+        for (line, command) in &item.commands {
+            let Ok(mut child) = Command::new("tmux")
+                .args(["source-file", "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            else {
+                // No tmux: the next ones would not start either.
+                return;
+            };
+            if let Some(mut stdin) = child.stdin.take() {
+                // One command: it fits in the pipe. The end of the input is
+                // the drop.
+                let _ = writeln!(stdin, "{command}");
             }
-            Setup::Commands(commands) => {
-                let Ok(mut child) = cmd.arg("-").stdin(Stdio::piped()).spawn() else {
-                    return;
-                };
-                if let Some(mut stdin) = child.stdin.take() {
-                    // A few lines at most: they fit in the pipe. The end of the
-                    // input is the drop.
-                    let _ = writeln!(stdin, "{commands}");
-                }
-                let _ = child.wait();
+            let Ok(output) = child.wait_with_output() else {
+                continue;
+            };
+            if !output.status.success() {
+                // tmux says it on stdout (or on stderr), and names the line of
+                // its own input: "-:1: unknown command".
+                let mut said = String::from_utf8_lossy(&output.stdout).into_owned();
+                said.push_str(&String::from_utf8_lossy(&output.stderr));
+                let said = said.trim();
+                let said = said.strip_prefix("-:1: ").unwrap_or(said);
+                eprintln!("tmux-shim: {}:{line}: {said}", item.name);
             }
         }
     }
@@ -228,19 +232,36 @@ Options:
         }
     }
 
-    enum Setup {
-        File(std::path::PathBuf),
-        Commands(String),
+    /// What `--config` or `--config-string` brings: the text, and the name that
+    /// the errors use for it. The file is read here, in the command line: a file
+    /// that is not there is a mistake, better told now than ignored.
+    struct Setup {
+        name: String,
+        commands: Vec<(usize, String)>,
     }
 
     impl Setup {
+        fn from_file(file: &std::ffi::OsStr) -> Setup {
+            let name = file.to_string_lossy().into_owned();
+            match std::fs::read_to_string(file) {
+                Ok(text) => Setup {
+                    name,
+                    commands: config::file_commands(&text),
+                },
+                Err(err) => usage_error(&format!("--config {name}: {err}")),
+            }
+        }
+
         /// Commands that are only blanks are a mistake in the command line.
-        fn commands(commands: &std::ffi::OsStr) -> Setup {
-            let commands = commands.to_string_lossy().into_owned();
-            if commands.trim().is_empty() {
+        fn from_string(commands: &std::ffi::OsStr) -> Setup {
+            let commands = config::string_commands(&commands.to_string_lossy());
+            if commands.is_empty() {
                 usage_error("--config-string needs tmux commands");
             }
-            Setup::Commands(commands)
+            Setup {
+                name: "--config-string".to_string(),
+                commands,
+            }
         }
     }
 
