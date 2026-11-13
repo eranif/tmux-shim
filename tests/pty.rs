@@ -200,10 +200,14 @@ fn a_big_output_is_not_lost() {
     ));
 }
 
-/// A tmux server of its own (a private socket), and the value of
-/// `allow-passthrough` in the pane that runs the shim with `shim_args`.
-/// `None` when there is no tmux on this machine.
-fn passthrough_in_pane(shim_args: &str) -> Option<String> {
+/// A tmux server of its own (a private socket) with one pane that runs the
+/// shim with `shim_args`, and the answers of tmux to `queries` (each one is the
+/// arguments of a tmux command) once the shim has started. Each answer is
+/// trimmed. `None` when there is no tmux on this machine.
+fn in_tmux(shim_args: &[&str], queries: &[&[&str]]) -> Option<Vec<String>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
     let tmux = |args: &[&str]| {
         Command::new("tmux")
             .env_remove("TMUX")
@@ -211,8 +215,13 @@ fn passthrough_in_pane(shim_args: &str) -> Option<String> {
             .args(args)
             .output()
     };
-    let socket = format!("shim-test-{}-{}", std::process::id(), shim_args.len());
+    let socket = format!(
+        "shim-test-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
     let shim = env!("CARGO_BIN_EXE_tmux-shim");
+    let command = format!("{shim} {} -- sleep 5", shim_args.join(" "));
     let started = tmux(&[
         "-L",
         &socket,
@@ -220,34 +229,121 @@ fn passthrough_in_pane(shim_args: &str) -> Option<String> {
         "/dev/null",
         "new-session",
         "-d",
-        &format!("{shim} {shim_args} -- sleep 5"),
+        &command,
     ])
     .ok()?;
     if !started.status.success() {
         return None;
     }
-    // The shim sets the option as the first thing it does, but in its own time.
+    // The shim does its part as the first thing, but in its own time.
     std::thread::sleep(Duration::from_millis(1000));
-    let shown = tmux(&["-L", &socket, "show-options", "-p", "allow-passthrough"]);
+    let answers = queries
+        .iter()
+        .map(|query| {
+            let mut args = vec!["-L", socket.as_str()];
+            args.extend_from_slice(query);
+            tmux(&args).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        })
+        .collect::<Result<Vec<_>, _>>();
     let _ = tmux(&["-L", &socket, "kill-server"]);
-    Some(
-        String::from_utf8_lossy(&shown.ok()?.stdout)
-            .trim()
-            .to_string(),
-    )
+    answers.ok()
+}
+
+/// `allow-passthrough` that the pane of the shim has (its own value, or the one
+/// of the server).
+const PASSTHROUGH: &[&str] = &["show-options", "-pAv", "allow-passthrough"];
+
+/// A file for `--config`, in a directory of its own.
+fn config_file(name: &str, text: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("tmux-shim-test-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("tmux.conf");
+    std::fs::write(&file, text).unwrap();
+    file.to_string_lossy().into_owned()
 }
 
 #[test]
 fn tmux_is_told_to_let_the_reports_through() {
     // Skipped when there is no tmux (or when it is too old for a pane option).
-    if let Some(value) = passthrough_in_pane("") {
-        assert_eq!(value, "allow-passthrough on");
+    if let Some(answers) = in_tmux(&[], &[PASSTHROUGH]) {
+        assert_eq!(answers, ["on"]);
     }
 }
 
 #[test]
 fn the_setup_of_tmux_can_be_turned_off() {
-    if let Some(value) = passthrough_in_pane("--no-tmux-setup") {
-        assert_eq!(value, "");
+    if let Some(answers) = in_tmux(&["--no-tmux-setup"], &[PASSTHROUGH]) {
+        assert_eq!(answers, ["off"]);
     }
+}
+
+#[test]
+fn the_config_file_is_run_by_tmux() {
+    let conf = config_file(
+        "run",
+        "set -g mouse on\nsetw -g mode-keys vi\nset -g set-clipboard on\nset -g allow-passthrough all\n",
+    );
+    let queries: &[&[&str]] = &[
+        &["show-options", "-gv", "mouse"],
+        &["show-window-options", "-gv", "mode-keys"],
+        &["show-options", "-gv", "set-clipboard"],
+        PASSTHROUGH,
+    ];
+    if let Some(answers) = in_tmux(&["-c", &conf], queries) {
+        // "all" from the file is not replaced by the "on" of the shim.
+        assert_eq!(answers, ["on", "vi", "on", "all"]);
+    }
+}
+
+#[test]
+fn the_config_file_may_be_given_with_an_equals_sign() {
+    let conf = config_file("equals", "set -g mouse on\n");
+    let option = format!("--config={conf}");
+    if let Some(answers) = in_tmux(&[&option], &[&["show-options", "-gv", "mouse"]]) {
+        assert_eq!(answers, ["on"]);
+    }
+}
+
+#[test]
+fn a_config_file_that_is_not_there_is_an_error() {
+    let r = run(&["-c", "/no/such/file", "true"], Some("/tmp/x,1,0"));
+    assert_eq!(r.code, 2);
+    assert!(contains(&r.output, b"/no/such/file"));
+}
+
+#[test]
+fn a_string_of_commands_is_run_by_tmux() {
+    // The string of the user, a `;` inside quotes, and a file before it: they run in
+    // the order of the command line, and allow-passthrough "all" is kept.
+    let conf = config_file("string", "set -g mouse off\nset -g mode-keys emacs\n");
+    let commands = "set -g mouse on; setw -g mode-keys vi;set -g set-clipboard on ; \
+                    set -g allow-passthrough all; set -g status-left 'a; b'";
+    let option = format!("--config-string={commands}");
+    let queries: &[&[&str]] = &[
+        &["show-options", "-gv", "mouse"],
+        &["show-window-options", "-gv", "mode-keys"],
+        &["show-options", "-gv", "set-clipboard"],
+        &["show-options", "-gv", "status-left"],
+        PASSTHROUGH,
+    ];
+    // The shell of tmux takes the string, so it is quoted for it.
+    let quoted = format!("'{}'", option.replace('\'', "'\\''"));
+    if let Some(answers) = in_tmux(&["-c", &conf, &quoted], queries) {
+        assert_eq!(answers, ["on", "vi", "on", "a; b", "all"]);
+    }
+}
+
+#[test]
+fn a_string_of_commands_may_be_a_separate_argument() {
+    let queries: &[&[&str]] = &[&["show-options", "-gv", "mouse"]];
+    if let Some(answers) = in_tmux(&["--config-string", "'set -g mouse on'"], queries) {
+        assert_eq!(answers, ["on"]);
+    }
+}
+
+#[test]
+fn an_empty_string_of_commands_is_an_error() {
+    let r = run(&["--config-string", "  ", "true"], Some("/tmp/x,1,0"));
+    assert_eq!(r.code, 2);
+    assert!(contains(&r.output, b"--config-string"));
 }

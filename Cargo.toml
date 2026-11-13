@@ -6,7 +6,7 @@ description = "Lets a program inside tmux or screen report its status (OSC 7501,
 license = "MIT"
 repository = "https://github.com/eranif/tmux-shim"
 readme = "README.md"
-rust-version = "1.74"
+rust-version = "1.80"
 
 [dependencies]
 libc = "0.2"

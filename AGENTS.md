@@ -7,7 +7,7 @@ Guidance for AI coding agents (and people) working in this repository.
 `tmux-shim` is a small Unix command line program, written in Rust:
 
 ```
-tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [--no-tmux-setup] [--] COMMAND [ARGS...]
+tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [-c FILE] [--config-string COMMANDS] [--no-tmux-setup] [--] COMMAND [ARGS...]
 ```
 
 It runs `COMMAND` on a pty of its own and sits between that program and the terminal it
@@ -132,8 +132,11 @@ Tests:
 * OSC 52 (copy) and the title do not need wrapping: `set -g set-clipboard on` and
   `set -g set-titles on` are enough.
 * `allow-passthrough` is a pane option (3.3+), so the shim turns it on for its own pane at
-  startup (`tmux set-option -p allow-passthrough on`, errors ignored, `--no-tmux-setup` skips
-  it). It cannot do it for other panes or set `all`: whoever starts tmux does that.
+  startup when it is `off` (`tmux set-option -p allow-passthrough on`, errors ignored,
+  `--no-tmux-setup` skips it). A pane value overrides the server's, so an `all` is never
+  replaced by `on`. `-c FILE` runs `tmux source-file FILE` first (absolute path: the server has
+  its own cwd). `--config-string` pipes the commands to `tmux source-file -` (tmux 3.4 does not parse
+  a string of commands given as one argument). It cannot do it for other panes or set `all`: whoever starts tmux does that.
 
 ## Commits
 
