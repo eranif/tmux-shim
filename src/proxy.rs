@@ -84,7 +84,11 @@ fn install_signals() -> io::Result<RawFd> {
             action.sa_sigaction = on_signal as *const () as usize;
             libc::sigemptyset(&mut action.sa_mask);
             // No SA_RESTART: poll() returns, and the loop looks at the signal.
-            action.sa_flags = if sig == libc::SIGCHLD { libc::SA_NOCLDSTOP } else { 0 };
+            action.sa_flags = if sig == libc::SIGCHLD {
+                libc::SA_NOCLDSTOP
+            } else {
+                0
+            };
             if libc::sigaction(sig, &action, std::ptr::null_mut()) < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -220,7 +224,10 @@ impl TerminalGuard {
     /// Puts the terminal (stdin) in raw mode: the keys go to the program as they
     /// are, and what the shim writes is not changed.
     fn new(original: Option<libc::termios>) -> io::Result<Self> {
-        let mut guard = TerminalGuard { termios: original, flags: Vec::new() };
+        let mut guard = TerminalGuard {
+            termios: original,
+            flags: Vec::new(),
+        };
         if let Some(original) = &guard.termios {
             let mut raw = *original;
             unsafe {
@@ -273,7 +280,13 @@ fn open_pty(
     let termios_ptr = termios.map_or(std::ptr::null(), |t| t as *const libc::termios);
     let size_ptr = size.map_or(std::ptr::null(), |s| s as *const libc::winsize);
     let rc = unsafe {
-        libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), termios_ptr as _, size_ptr as _)
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            termios_ptr as _,
+            size_ptr as _,
+        )
     };
     if rc < 0 {
         return Err(io::Error::last_os_error());
@@ -381,10 +394,26 @@ pub fn run(command: &[OsString], options: &Options) -> io::Result<i32> {
     loop {
         // ---- What to wait for
         let mut fds = [
-            pollfd { fd: 0, events: 0, revents: 0 },
-            pollfd { fd: 1, events: 0, revents: 0 },
-            pollfd { fd: master_fd, events: 0, revents: 0 },
-            pollfd { fd: signal_fd, events: POLLIN, revents: 0 },
+            pollfd {
+                fd: 0,
+                events: 0,
+                revents: 0,
+            },
+            pollfd {
+                fd: 1,
+                events: 0,
+                revents: 0,
+            },
+            pollfd {
+                fd: master_fd,
+                events: 0,
+                revents: 0,
+            },
+            pollfd {
+                fd: signal_fd,
+                events: POLLIN,
+                revents: 0,
+            },
         ];
         if !stdin_closed && to_child.len() < BUF_LIMIT {
             fds[0].events = POLLIN;
@@ -408,7 +437,10 @@ pub fn run(command: &[OsString], options: &Options) -> io::Result<i32> {
             timeout = 50; // The pty is closed: the program is about to end.
         }
         if let Some(at) = kill_at {
-            let ms = at.saturating_duration_since(Instant::now()).as_millis().min(1 << 30) as c_int;
+            let ms = at
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .min(1 << 30) as c_int;
             timeout = if timeout < 0 { ms } else { timeout.min(ms) };
         }
 
@@ -451,7 +483,11 @@ pub fn run(command: &[OsString], options: &Options) -> io::Result<i32> {
                 }
                 match read_some(master_fd, &mut read_buf) {
                     Read::Data(n) => {
-                        let out = if parent_gone { &mut Vec::new() } else { to_parent.vec() };
+                        let out = if parent_gone {
+                            &mut Vec::new()
+                        } else {
+                            to_parent.vec()
+                        };
                         filter.feed(&read_buf[..n], out, &mut replies);
                         if !replies.is_empty() {
                             to_child.vec().extend_from_slice(&replies);
@@ -510,21 +546,33 @@ pub fn run(command: &[OsString], options: &Options) -> io::Result<i32> {
                     match read_some(master_fd, &mut read_buf) {
                         Read::Data(n) => {
                             quiet = 0;
-                            let out = if parent_gone { &mut Vec::new() } else { to_parent.vec() };
+                            let out = if parent_gone {
+                                &mut Vec::new()
+                            } else {
+                                to_parent.vec()
+                            };
                             filter.feed(&read_buf[..n], out, &mut replies);
                             if !parent_gone && to_parent.len() >= BUF_LIMIT {
                                 if write_some(1, &mut to_parent).is_err() {
                                     parent_gone = true;
                                     to_parent.clear();
                                 } else if to_parent.len() >= BUF_LIMIT {
-                                    let mut out = [pollfd { fd: 1, events: POLLOUT, revents: 0 }];
+                                    let mut out = [pollfd {
+                                        fd: 1,
+                                        events: POLLOUT,
+                                        revents: 0,
+                                    }];
                                     unsafe { libc::poll(out.as_mut_ptr(), 1, 10) };
                                 }
                             }
                         }
                         Read::Closed => break,
                         Read::Empty => {
-                            let mut wait = [pollfd { fd: master_fd, events: POLLIN, revents: 0 }];
+                            let mut wait = [pollfd {
+                                fd: master_fd,
+                                events: POLLIN,
+                                revents: 0,
+                            }];
                             if unsafe { libc::poll(wait.as_mut_ptr(), 1, 20) } == 0 {
                                 quiet += 1;
                             }
@@ -538,7 +586,11 @@ pub fn run(command: &[OsString], options: &Options) -> io::Result<i32> {
                     if write_some(1, &mut to_parent).is_err() || to_parent.is_empty() {
                         break;
                     }
-                    let mut out = [pollfd { fd: 1, events: POLLOUT, revents: 0 }];
+                    let mut out = [pollfd {
+                        fd: 1,
+                        events: POLLOUT,
+                        revents: 0,
+                    }];
                     unsafe { libc::poll(out.as_mut_ptr(), 1, 100) };
                 }
             }

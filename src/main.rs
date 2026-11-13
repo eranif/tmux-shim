@@ -2,7 +2,7 @@
 //! terminal around tmux (or screen).
 //!
 //! ```text
-//! tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] -- COMMAND [ARGS...]
+//! tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [--no-tmux-setup] -- COMMAND [ARGS...]
 //! ```
 //!
 //! See the README.
@@ -28,10 +28,17 @@ protocol?) is answered by the shim.
 
 Outside tmux and screen (no $TMUX, no $STY) the shim just starts COMMAND.
 
+Inside tmux, tmux forwards the wrapped sequences only when allow-passthrough
+is on. The shim runs `tmux set-option -p allow-passthrough on` for its own
+pane (tmux 3.3 or later; the other panes and the config are not touched). If
+that fails, nothing is lost but the status icon.
+
 Options:
   --wrap MODE   auto (default: tmux if $TMUX is set, screen if $STY is set,
                 otherwise none), tmux, screen, or none
   --no-reply    do not answer OSC 7501;? (pass it on instead)
+  --no-tmux-setup
+                do not turn on allow-passthrough for the pane (see below)
   -h, --help    show this text
   -V, --version show the version
 ";
@@ -44,6 +51,7 @@ Options:
 
     let mut mode = Mode::Auto;
     let mut answer_query = true;
+    let mut tmux_setup = true;
     let mut command: Vec<OsString> = Vec::new();
 
     let mut args = std::env::args_os().skip(1);
@@ -72,6 +80,7 @@ Options:
                 return;
             }
             "--no-reply" => answer_query = false,
+            "--no-tmux-setup" => tmux_setup = false,
             "--wrap" => {
                 let value = args.next().map(|v| v.to_string_lossy().into_owned());
                 match value.as_deref().and_then(parse_mode) {
@@ -105,15 +114,37 @@ Options:
         Mode::Auto => {
             // Nothing drops the sequences here: there is nothing to do. The
             // program takes the place of the shim.
-            let err = std::process::Command::new(&command[0]).args(&command[1..]).exec();
+            let err = std::process::Command::new(&command[0])
+                .args(&command[1..])
+                .exec();
             fail_to_start(&command[0], &err);
         }
     };
+
+    if tmux_setup && wrap == Wrap::Tmux && in_multiplexer("TMUX") {
+        allow_passthrough();
+    }
 
     let options = proxy::Options { wrap, answer_query };
     match proxy::run(&command, &options) {
         Ok(code) => std::process::exit(code),
         Err(err) => fail_to_start(&command[0], &err),
+    }
+
+    /// Turns `allow-passthrough` on for the pane of the shim. It is a pane option
+    /// since tmux 3.3, and tmux picks the pane from `$TMUX_PANE`, so a program
+    /// in a pane can do it for itself and for nobody else. It runs before the
+    /// program starts: the first report is not lost. Every failure (no `tmux`
+    /// on the PATH, an old tmux, a server that is gone) is ignored: without
+    /// it the reports are dropped by tmux, as they are without the shim.
+    fn allow_passthrough() {
+        use std::process::{Command, Stdio};
+        let _ = Command::new("tmux")
+            .args(["set-option", "-p", "allow-passthrough", "on"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
 
     fn usage_error(message: &str) -> ! {
@@ -123,7 +154,11 @@ Options:
 
     fn fail_to_start(program: &OsString, err: &std::io::Error) -> ! {
         eprintln!("tmux-shim: {}: {err}", program.to_string_lossy());
-        let code = if err.kind() == std::io::ErrorKind::NotFound { 127 } else { 126 };
+        let code = if err.kind() == std::io::ErrorKind::NotFound {
+            127
+        } else {
+            126
+        };
         std::process::exit(code);
     }
 }

@@ -31,7 +31,8 @@ pub const MAX_HELD: usize = 4096;
 
 /// What the program gets as the answer to `OSC 7501 ; ?` (the answer that the
 /// terminal of Kennel gives).
-pub const QUERY_REPLY: &[u8] = b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
+pub const QUERY_REPLY: &[u8] =
+    b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
 
 /// How the sequences are wrapped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,7 +156,11 @@ impl Filter {
                     // tmux wants it). Another byte after the ESC should end the
                     // string too, but a string that is not ended only costs the
                     // rewrite, never a byte, so it stays lenient.
-                    self.state = if b == b'\\' { State::Normal } else { State::Dcs };
+                    self.state = if b == b'\\' {
+                        State::Normal
+                    } else {
+                        State::Dcs
+                    };
                 }
                 State::Esc => {
                     let b = input[i];
@@ -359,7 +364,11 @@ mod tests {
 
     #[test]
     fn query_is_answered_and_removed() {
-        for q in [&b"\x1b]7501;?\x1b\\"[..], b"\x1b]7501;?\x07", b"\x1b]7501;?:x\x07"] {
+        for q in [
+            &b"\x1b]7501;?\x1b\\"[..],
+            b"\x1b]7501;?\x07",
+            b"\x1b]7501;?:x\x07",
+        ] {
             let (out, replies) = run(Wrap::Tmux, true, &[q]);
             assert!(out.is_empty());
             assert_eq!(replies, QUERY_REPLY);

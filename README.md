@@ -27,18 +27,24 @@ Outside tmux and screen (no `$TMUX`, no `$STY`) the shim just starts the program
 ## Use
 
 ```sh
-tmux set -g allow-passthrough on        # tmux 3.3 or later ("all" in 3.4: also for hidden panes)
 tmux-shim -- claude --continue          # in a tmux pane
 ```
 
 ```
-tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [--] COMMAND [ARGS...]
+tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [--no-tmux-setup] [--] COMMAND [ARGS...]
 ```
 
 | Option | |
 |---|---|
 | `--wrap MODE` | `auto` (default): tmux if `$TMUX` is set, screen if `$STY` is set, otherwise the program is started directly. `none` still runs the shim, without wrapping. |
 | `--no-reply` | Pass `OSC 7501 ; ?` on instead of answering it. |
+| `--no-tmux-setup` | Do not run `tmux set-option -p allow-passthrough on` (see below). |
+
+tmux forwards the wrapped sequences only when `allow-passthrough` is on. In tmux 3.3 or
+later the shim turns it on for its own pane, before it starts the program (no other pane and
+no config is changed; failures are ignored). To turn it on for every pane, or to also reach
+the outer terminal from hidden panes (`all`, tmux 3.4), put
+`set -g allow-passthrough on` (or `all`) in `~/.tmux.conf`.
 
 The exit code of the program is the exit code of the shim (128 + the signal when it was
 killed). The window size follows the pane, and `SIGHUP` / `SIGTERM` go to the program.

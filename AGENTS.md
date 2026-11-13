@@ -7,7 +7,7 @@ Guidance for AI coding agents (and people) working in this repository.
 `tmux-shim` is a small Unix command line program, written in Rust:
 
 ```
-tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [--] COMMAND [ARGS...]
+tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [--no-tmux-setup] [--] COMMAND [ARGS...]
 ```
 
 It runs `COMMAND` on a pty of its own and sits between that program and the terminal it
@@ -44,9 +44,9 @@ and runs them as `tmux-shim -- <agent>`. Kennel's `RemoteInstaller` downloads th
 binary, checks its SHA-256 (pinned in Kennel) and puts it in `~/.kennel/bin` on the machine
 where the agent runs. The shim itself knows nothing about Kennel and must stay generic.
 
-Release assets (see `.github/workflows/release.yml`): static musl binaries named
-`tmux-shim-x86_64-linux` and `tmux-shim-aarch64-linux` (the names match `uname -m`), each
-with a `.sha256` file. Do not rename them: Kennel depends on the names.
+Release assets (see `.github/workflows/release.yml`): a static musl binary named
+`tmux-shim-x86_64-linux` (the name matches `uname -m`), with a `.sha256` file. Only x86_64
+is built (aarch64 was dropped). Do not rename it: Kennel depends on the name.
 
 ## Layout
 
@@ -131,7 +131,9 @@ Tests:
   the outer terminal.
 * OSC 52 (copy) and the title do not need wrapping: `set -g set-clipboard on` and
   `set -g set-titles on` are enough.
-* The shim cannot turn `allow-passthrough` on: whoever starts tmux does it.
+* `allow-passthrough` is a pane option (3.3+), so the shim turns it on for its own pane at
+  startup (`tmux set-option -p allow-passthrough on`, errors ignored, `--no-tmux-setup` skips
+  it). It cannot do it for other panes or set `all`: whoever starts tmux does that.
 
 ## Commits
 
