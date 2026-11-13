@@ -1,0 +1,20 @@
+[package]
+name = "tmux-shim"
+version = "0.1.0"
+edition = "2021"
+description = "Lets a program inside tmux or screen report its status (OSC 7501, 9;4, 7) to the outer terminal"
+license = "MIT"
+repository = "https://github.com/eranif/tmux-shim"
+readme = "README.md"
+rust-version = "1.74"
+
+[dependencies]
+libc = "0.2"
+memchr = "2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

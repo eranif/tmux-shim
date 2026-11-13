@@ -1,0 +1,38 @@
+name: Release
+
+# Push a tag such as v0.1.0: static Linux binaries are built and attached to the
+# release, each with its SHA-256 (Kennel pins both).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            name: tmux-shim-x86_64-linux
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            name: tmux-shim-aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cp target/${{ matrix.target }}/release/tmux-shim ${{ matrix.name }}
+          sha256sum ${{ matrix.name }} > ${{ matrix.name }}.sha256
+          file ${{ matrix.name }}
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" ${{ matrix.name }} ${{ matrix.name }}.sha256 --clobber
