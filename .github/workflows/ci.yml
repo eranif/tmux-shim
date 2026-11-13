@@ -70,7 +70,9 @@ jobs:
       - name: Static, and it runs
         run: |
           bin=target/aarch64-unknown-linux-musl/release/tmux-shim
-          file "$bin" | grep -E "static(-pie)? linked"
+          # "static-pie linked" on x86_64, "statically linked" when it is not a PIE.
+          file "$bin"
+          file "$bin" | grep -E "static(-pie|ally)? linked"
           "$bin" --version
           env -u TMUX -u STY "$bin" -- echo ok | grep -x ok
 
