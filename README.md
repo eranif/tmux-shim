@@ -30,6 +30,14 @@ Outside tmux and screen (no `$TMUX`, no `$STY`) the shim just starts the program
 tmux-shim -- claude --continue          # in a tmux pane
 ```
 
+With the tmux settings that the program needs, set by the shim (they are the commands of
+a tmux config file):
+
+```sh
+tmux-shim --config-string='set -g mouse on; setw -g mode-keys vi; set -g set-clipboard on; set -g allow-passthrough all' -- claude
+tmux-shim -c ~/.config/tmux-shim.conf -- claude        # or the same, from a file
+```
+
 ```
 tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [-c FILE] [--config-string COMMANDS] [--no-tmux-setup] [--] COMMAND [ARGS...]
 ```
@@ -43,13 +51,29 @@ tmux-shim [--wrap auto|tmux|screen|none] [--no-reply] [-c FILE] [--config-string
 | `--no-tmux-setup` | Do not run `tmux set-option -p allow-passthrough on` (see below). |
 
 tmux forwards the wrapped sequences only when `allow-passthrough` is on. In tmux 3.3 or
-later the shim turns it on for its own pane when it is `off`, before it starts the program (no other pane and
-no config is changed; failures are ignored). To turn it on for every pane, or to also reach
-the outer terminal from hidden panes (`all`, tmux 3.4), put
-`set -g allow-passthrough on` (or `all`) in `~/.tmux.conf`.
+later the shim turns it on for its own pane when it is `off`, before it starts the program.
+No other pane and no config is changed, failures are ignored, and a value that is already
+`on` or `all` is left alone. To turn it on for every pane, or to also reach the outer
+terminal from hidden panes (`all`, tmux 3.4), put `set -g allow-passthrough all` in
+`~/.tmux.conf`, or in `-c` / `--config-string`.
 
 The exit code of the program is the exit code of the shim (128 + the signal when it was
 killed). The window size follows the pane, and `SIGHUP` / `SIGTERM` go to the program.
+
+## Install
+
+Each release has a static Linux binary, `tmux-shim-x86_64-linux`, with a
+`tmux-shim-x86_64-linux.sha256` file (there is no aarch64 build). It needs no library. The
+shim sets `allow-passthrough` for its pane only in tmux 3.3 or later (the option is per pane
+from that version); with an older tmux, turn it on yourself for the reports to be forwarded.
+Screen needs nothing.
+
+```sh
+f=tmux-shim-x86_64-linux
+curl -fLO https://github.com/eranif/tmux-shim/releases/latest/download/$f
+curl -fLO https://github.com/eranif/tmux-shim/releases/latest/download/$f.sha256
+sha256sum -c $f.sha256 && install -m 755 $f ~/.local/bin/tmux-shim
+```
 
 ## Build
 
@@ -58,7 +82,10 @@ cargo build --release
 cargo test
 ```
 
-Unix only (Linux, macOS). For a static Linux binary:
+Unix only (Linux, macOS), Rust 1.80 or later. The tests that start tmux need `tmux` on the
+`PATH` and skip themselves when it is missing (`TMUX_SHIM_REQUIRE_TMUX=1` makes that an
+error, as in CI). The tests that run programs on a pty use GNU `dd`, `od` and `stty`, so
+they run on Linux only. For a static Linux binary:
 `rustup target add x86_64-unknown-linux-musl && cargo build --release --target x86_64-unknown-linux-musl`.
 
 ## How it works

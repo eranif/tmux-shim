@@ -8,11 +8,48 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    env:
+      # The tests that start a tmux of their own (allow-passthrough, --config)
+      # skip themselves when there is none. Here that is an error.
+      TMUX_SHIM_REQUIRE_TMUX: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Install tmux
+        run: |
+          command -v tmux >/dev/null || { sudo apt-get update && sudo apt-get install -y tmux; }
+          tmux -V
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+
+  # The oldest Rust that the program says it builds with (rust-version in Cargo.toml).
+  msrv:
+    runs-on: ubuntu-latest
+    env:
+      TMUX_SHIM_REQUIRE_TMUX: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tmux
+        run: command -v tmux >/dev/null || { sudo apt-get update && sudo apt-get install -y tmux; }
+      - name: Read rust-version
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - run: rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal
+      - run: cargo +${{ steps.msrv.outputs.version }} test --locked
+
+  # The binary that the release workflow publishes: static, and it works.
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl
+      - name: Static, and it runs
+        run: |
+          bin=target/x86_64-unknown-linux-musl/release/tmux-shim
+          file "$bin" | grep -E "static(-pie)? linked"
+          "$bin" --version
+          env -u TMUX -u STY "$bin" -- echo ok | grep -x ok
 
   macos:
     runs-on: macos-latest

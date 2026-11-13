@@ -231,8 +231,13 @@ fn in_tmux(shim_args: &[&str], queries: &[&[&str]]) -> Option<Vec<String>> {
         "-d",
         &command,
     ])
-    .ok()?;
-    if !started.status.success() {
+    .ok();
+    if !started.is_some_and(|o| o.status.success()) {
+        // CI sets the variable: there a missing tmux is an error, not a skip.
+        assert!(
+            std::env::var_os("TMUX_SHIM_REQUIRE_TMUX").is_none(),
+            "tmux does not start, and TMUX_SHIM_REQUIRE_TMUX is set"
+        );
         return None;
     }
     // The shim does its part as the first thing, but in its own time.
