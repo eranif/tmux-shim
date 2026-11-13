@@ -68,14 +68,14 @@ killed). The window size follows the pane, and `SIGHUP` / `SIGTERM` go to the pr
 
 ## Install
 
-Each release has a static Linux binary, `tmux-shim-x86_64-linux`, with a
-`tmux-shim-x86_64-linux.sha256` file (there is no aarch64 build). It needs no library. The
+Each release has a static Linux binary for x86_64 and for aarch64 (`tmux-shim-x86_64-linux`,
+`tmux-shim-aarch64-linux`), each with a `.sha256` file. It needs no library. The
 shim sets `allow-passthrough` for its pane only in tmux 3.3 or later (the option is per pane
 from that version); with an older tmux, turn it on yourself for the reports to be forwarded.
 Screen needs nothing.
 
 ```sh
-f=tmux-shim-x86_64-linux
+f=tmux-shim-$(uname -m)-linux   # x86_64 or aarch64
 curl -fLO https://github.com/eranif/tmux-shim/releases/latest/download/$f
 curl -fLO https://github.com/eranif/tmux-shim/releases/latest/download/$f.sha256
 sha256sum -c $f.sha256 && install -m 755 $f ~/.local/bin/tmux-shim

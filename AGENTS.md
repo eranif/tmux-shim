@@ -44,9 +44,9 @@ and runs them as `tmux-shim -- <agent>`. Kennel's `RemoteInstaller` downloads th
 binary, checks its SHA-256 (pinned in Kennel) and puts it in `~/.kennel/bin` on the machine
 where the agent runs. The shim itself knows nothing about Kennel and must stay generic.
 
-Release assets (see `.github/workflows/release.yml`): a static musl binary named
-`tmux-shim-x86_64-linux` (the name matches `uname -m`), with a `.sha256` file. Only x86_64
-is built (aarch64 was dropped). Do not rename it: Kennel depends on the name.
+Release assets (see `.github/workflows/release.yml`): static musl binaries named
+`tmux-shim-x86_64-linux` and `tmux-shim-aarch64-linux` (the names match `uname -m`), each
+with a `.sha256` file. Do not rename them: Kennel depends on the names.
 
 ## Layout
 
