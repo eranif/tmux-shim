@@ -51,6 +51,29 @@ jobs:
           "$bin" --version
           env -u TMUX -u STY "$bin" -- echo ok | grep -x ok
 
+  # The same on Linux arm64: the tests, and the static binary. The release does not
+  # publish an aarch64 binary (yet); this keeps the code and the build working there.
+  linux-arm:
+    runs-on: ubuntu-24.04-arm
+    env:
+      TMUX_SHIM_REQUIRE_TMUX: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tmux
+        run: |
+          command -v tmux >/dev/null || { sudo apt-get update && sudo apt-get install -y tmux; }
+          tmux -V
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: rustup target add aarch64-unknown-linux-musl
+      - run: cargo build --release --locked --target aarch64-unknown-linux-musl
+      - name: Static, and it runs
+        run: |
+          bin=target/aarch64-unknown-linux-musl/release/tmux-shim
+          file "$bin" | grep -E "static(-pie)? linked"
+          "$bin" --version
+          env -u TMUX -u STY "$bin" -- echo ok | grep -x ok
+
   macos:
     runs-on: macos-latest
     steps:
